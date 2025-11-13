@@ -1,0 +1,131 @@
+src/service/
+
+
+interface CompressionResult {
+  id: string;
+  success: boolean;
+  originalSize: number;
+  compressedSize: number;
+  compressionRatio: number;
+  fileName: string;
+  error?: string;
+  timestamp: number;
+}
+
+interface CompressionTask {
+  id: string;
+  file: File;
+}
+
+export class CompressionService {
+  private workerPool: Worker[] = [];
+  private maxWorkers: number;
+  private taskQueue: CompressionTask[] = [];
+  private activeWorkers: Set<Worker> = new Set();
+  private resultCallbacks: Map<string, (result: CompressionResult) => void> = new Map();
+
+  constructor(maxWorkers: number = navigator.hardwareConcurrency || 4) {
+    this.maxWorkers = Math.max(1, maxWorkers);
+    this.initializeWorkerPool();
+  }
+
+  private initializeWorkerPool(): void {
+    for (let i = 0; i < this.maxWorkers; i++) {
+      const worker = new Worker(new URL('../workers/compressionWorker.ts', import.meta.url), {
+        type: 'module',
+      });
+
+      worker.onmessage = (event: MessageEvent<CompressionResult>) => {
+        const result = event.data;
+        const callback = this.resultCallbacks.get(result.id);
+
+        if (callback) {
+          callback(result);
+          this.resultCallbacks.delete(result.id);
+        }
+
+        this.activeWorkers.delete(worker);
+        this.processNextTask(worker);
+      };
+
+      worker.onerror = (error: ErrorEvent) => {
+        console.error('Worker error:', error.message);
+        this.activeWorkers.delete(worker);
+        this.processNextTask(worker);
+      };
+
+      this.workerPool.push(worker);
+    }
+  }
+
+  private processNextTask(worker: Worker): void {
+    if (this.taskQueue.length === 0) {
+      return;
+    }
+
+    const task = this.taskQueue.shift();
+    if (task) {
+      this.activeWorkers.add(worker);
+      worker.postMessage(task);
+    }
+  }
+
+  compressFile(file: File): Promise<CompressionResult> {
+    return new Promise((resolve) => {
+      const id = `${file.name}-${Date.now()}-${Math.random()}`;
+      const task: CompressionTask = { id, file };
+
+      this.resultCallbacks.set(id, resolve);
+
+      const availableWorker = this.workerPool.find((w) => !this.activeWorkers.has(w));
+
+      if (availableWorker) {
+        this.activeWorkers.add(availableWorker);
+        availableWorker.postMessage(task);
+      } else {
+        this.taskQueue.push(task);
+      }
+    });
+  }
+
+  async compressMultipleFiles(files: File[]): Promise<CompressionResult[]> {
+    const compressionPromises = files.map((file) => this.compressFile(file));
+    return Promise.all(compressionPromises);
+  }
+
+  getWorkerCount(): number {
+    return this.maxWorkers;
+  }
+
+  getActiveWorkerCount(): number {
+    return this.activeWorkers.size;
+  }
+
+  getQueuedTaskCount(): number {
+    return this.taskQueue.length;
+  }
+
+  dispose(): void {
+    this.workerPool.forEach((worker) => worker.terminate());
+    this.workerPool = [];
+    this.activeWorkers.clear();
+    this.taskQueue = [];
+    this.resultCallbacks.clear();
+  }
+}
+
+let compressionService: CompressionService | null = null;
+
+export function getCompressionService(): CompressionService {
+  if (!compressionService) {
+    compressionService = new CompressionService();
+  }
+  return compressionService;
+}
+
+export function disposeCompressionService(): void {
+  if (compressionService) {
+    compressionService.dispose();
+    compressionService = null;
+  }
+}

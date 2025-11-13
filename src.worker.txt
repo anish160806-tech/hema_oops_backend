@@ -1,0 +1,56 @@
+src/worker
+
+
+import pako from 'pako';
+
+interface CompressionTask {
+  id: string;
+  file: File;
+}
+
+interface CompressionResult {
+  id: string;
+  success: boolean;
+  originalSize: number;
+  compressedSize: number;
+  compressionRatio: number;
+  fileName: string;
+  error?: string;
+  timestamp: number;
+}
+
+self.onmessage = async (event: MessageEvent<CompressionTask>) => {
+  const { id, file } = event.data;
+
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const uint8Array = new Uint8Array(arrayBuffer);
+
+    const compressed = pako.gzip(uint8Array);
+
+    const result: CompressionResult = {
+      id,
+      success: true,
+      originalSize: file.size,
+      compressedSize: compressed.length,
+      compressionRatio: parseFloat(((1 - compressed.length / file.size) * 100).toFixed(2)),
+      fileName: file.name,
+      timestamp: Date.now(),
+    };
+
+    self.postMessage(result);
+  } catch (error) {
+    const result: CompressionResult = {
+      id,
+      success: false,
+      originalSize: file.size,
+      compressedSize: 0,
+      compressionRatio: 0,
+      fileName: file.name,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: Date.now(),
+    };
+
+    self.postMessage(result);
+  }
+};

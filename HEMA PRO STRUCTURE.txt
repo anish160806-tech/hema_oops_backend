@@ -1,0 +1,11 @@
+PROJECT STRUCTURE 
+
+PROJECT: Concurrent File Compressor (Java + JavaFX)
+
+ConcurrentFileCompressor/
+ ├── src/
+ │    ├── app/
+ │    │     ├── Main.java              → JavaFX launcher
+ │    │     ├── CompressorBackend.java → Backend logic
+ │    │     └── CompressorController.java → GUI logic (frontend)
+ └── files_to_compress/                → Folder with files to test
